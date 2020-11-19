@@ -474,6 +474,25 @@ impl Parser for Float64Type {
     }
 }
 
+impl Parser for UInt64Type {}
+
+impl Parser for UInt32Type {}
+
+impl Parser for UInt16Type {}
+
+impl Parser for UInt8Type {}
+
+impl Parser for Int64Type {}
+
+impl Parser for Int32Type {}
+
+impl Parser for Int16Type {}
+
+impl Parser for Int8Type {}
+fn parse_item<T: Parser>(string: &str) -> Option<T::Native> {
+    T::parse(string)
+}
+
 // parses a specific column (col_idx) into an Arrow Array.
 fn build_primitive_array<T: ArrowPrimitiveType + Parser>(
     line_number: usize,
