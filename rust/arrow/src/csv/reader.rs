@@ -489,6 +489,7 @@ impl Parser for Int32Type {}
 impl Parser for Int16Type {}
 
 impl Parser for Int8Type {}
+
 fn parse_item<T: Parser>(string: &str) -> Option<T::Native> {
     T::parse(string)
 }
