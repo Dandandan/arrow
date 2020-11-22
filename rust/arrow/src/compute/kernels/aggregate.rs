@@ -44,12 +44,21 @@ fn min_max_string<T: StringOffsetSizeTrait, F: Fn(&str, &str) -> bool>(
         }
     } else {
         n = "";
-        let mut has_value = false;
-
+        let mut first_non_null = 0;
+        // First find value of non null item
         for i in 0..data.len() {
             let item = array.value(i);
-            if data.is_valid(i) && (!has_value || cmp(&n, item)) {
-                has_value = true;
+            if data.is_valid(i) {
+                n = item;
+                first_non_null = i + 1;
+                break;
+            }
+        }
+
+        // Continue normal comparison
+        for i in first_non_null..data.len() {
+            let item = array.value(i);
+            if data.is_valid(i) && cmp(&n, item) {
                 n = item;
             }
         }
@@ -106,16 +115,26 @@ where
 
     if null_count == 0 {
         // optimized path for arrays without null values
-        n = m[1..]
-            .iter()
-            .fold(m[0], |max, item| if cmp(&max, item) { *item } else { max });
+        n = m[1..].iter().fold(
+            array.value(0),
+            |max, item| if cmp(&max, item) { *item } else { max },
+        );
     } else {
+        // First find value of non null item
         n = T::default_value();
-        let mut has_value = false;
+        let mut first_non_null = 0;
         for (i, item) in m.iter().enumerate() {
-            if data.is_valid(i) && (!has_value || cmp(&n, item)) {
-                has_value = true;
-                n = *item
+            if data.is_valid(i) {
+                n = *item;
+                first_non_null = i + 1;
+                break;
+            }
+        }
+        // Continue normal comparison
+        for i in first_non_null..m.len() {
+            let item = array.value(i);
+            if data.is_valid(i) && cmp(&n, &item) {
+                n = item;
             }
         }
     }
