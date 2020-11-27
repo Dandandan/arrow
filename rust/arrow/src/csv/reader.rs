@@ -56,7 +56,7 @@ use crate::datatypes::*;
 use crate::error::{ArrowError, Result};
 use crate::record_batch::RecordBatch;
 
-use self::csv_crate::StringRecord;
+use self::csv_crate::ByteRecord;
 
 lazy_static! {
     static ref DECIMAL_RE: Regex = Regex::new(r"^-?(\d+\.\d+)$").unwrap();
@@ -129,10 +129,10 @@ fn infer_file_schema<R: Read + Seek>(
     let mut records_count = 0;
     let mut fields = vec![];
 
-    let mut record = StringRecord::new();
+    let mut record = ByteRecord::new();
     let max_records = max_read_records.unwrap_or(usize::MAX);
     while records_count < max_records {
-        if !csv_reader.read_record(&mut record)? {
+        if !csv_reader.read_byte_record(&mut record)? {
             break;
         }
         records_count += 1;
@@ -142,7 +142,12 @@ fn infer_file_schema<R: Read + Seek>(
                 if string.is_empty() {
                     nulls[i] = true;
                 } else {
-                    column_types[i].insert(infer_field_schema(string));
+                    let str = std::str::from_utf8(string);
+                    if let Ok(s) = str {
+                        column_types[i].insert(infer_field_schema(s));
+                    } else {
+                        nulls[i] = true;
+                    }
                 }
             }
         }
@@ -235,8 +240,8 @@ pub struct Reader<R: Read> {
     end: usize,
     // number of records per batch
     batch_size: usize,
-    // Vector that can hold the string records of the batches
-    batch_records: Vec<StringRecord>,
+    // Vector that can hold the byte records of the batches
+    batch_records: Vec<ByteRecord>,
 }
 
 impl<R> fmt::Debug for Reader<R>
@@ -319,10 +324,10 @@ impl<R: Read> Reader<R> {
         // to seek in CSV. However, skiping still saves the burden of creating arrow arrays,
         // which is a slow operation that scales with the number of columns
 
-        let mut record = StringRecord::new();
+        let mut record = ByteRecord::new();
         // skip first start items
         for _ in 0..start {
-            let res = csv_reader.read_record(&mut record);
+            let res = csv_reader.read_byte_record(&mut record);
             if !res.unwrap_or(false) {
                 break;
             }
@@ -331,7 +336,7 @@ impl<R: Read> Reader<R> {
         // Initialize batch_records with StringRecords so they
         // can be reused accross batches
         let mut batch_records = Vec::with_capacity(batch_size);
-        let record = StringRecord::new();
+        let record = ByteRecord::new();
         for _ in 0..batch_size {
             batch_records.push(record.clone());
         }
@@ -356,7 +361,7 @@ impl<R: Read> Iterator for Reader<R> {
 
         let mut read_records = 0;
         for i in 0..min(self.batch_size, remaining) {
-            match self.reader.read_record(&mut self.batch_records[i]) {
+            match self.reader.read_byte_record(&mut self.batch_records[i]) {
                 Ok(true) => {
                     read_records += 1;
                 }
@@ -390,9 +395,9 @@ impl<R: Read> Iterator for Reader<R> {
     }
 }
 
-/// parses a slice of [csv_crate::StringRecord] into a [array::record_batch::RecordBatch].
+/// parses a slice of [csv_crate::ByteRecord] into a [array::record_batch::RecordBatch].
 fn parse(
-    rows: &[StringRecord],
+    rows: &[ByteRecord],
     fields: &[Field],
     projection: &Option<Vec<usize>>,
     line_number: usize,
@@ -445,7 +450,13 @@ fn parse(
                     let mut builder = StringBuilder::new(rows.len());
                     for row in rows.iter() {
                         match row.get(i) {
-                            Some(s) => builder.append_value(s).unwrap(),
+                            Some(bytes) => {
+                                if let Ok(s) = std::str::from_utf8(bytes) {
+                                    builder.append_value(s).unwrap()
+                                } else {
+                                    builder.append(false).unwrap()
+                                }
+                            }
                             _ => builder.append(false).unwrap(),
                         }
                     }
@@ -469,16 +480,19 @@ fn parse(
 
 /// Specialized parsing implementations
 trait Parser: ArrowPrimitiveType {
-    fn parse(string: &str) -> Option<Self::Native> {
-        string.parse::<Self::Native>().ok()
+    fn parse(bytes: &[u8]) -> Option<Self::Native> {
+        match std::str::from_utf8(bytes) {
+            Ok(str) => str.parse::<Self::Native>().ok(),
+            _ => None,
+        }
     }
 }
 
 impl Parser for BooleanType {
-    fn parse(string: &str) -> Option<bool> {
-        if string.eq_ignore_ascii_case("false") {
+    fn parse(string: &[u8]) -> Option<bool> {
+        if string.eq_ignore_ascii_case("false".as_bytes()) {
             Some(false)
-        } else if string.eq_ignore_ascii_case("true") {
+        } else if string.eq_ignore_ascii_case("true".as_bytes()) {
             Some(true)
         } else {
             None
@@ -487,40 +501,72 @@ impl Parser for BooleanType {
 }
 
 impl Parser for Float32Type {
-    fn parse(string: &str) -> Option<f32> {
-        lexical_core::parse(string.as_bytes()).ok()
+    fn parse(string: &[u8]) -> Option<f32> {
+        lexical_core::parse(string).ok()
     }
 }
 impl Parser for Float64Type {
-    fn parse(string: &str) -> Option<f64> {
-        lexical_core::parse(string.as_bytes()).ok()
+    fn parse(string: &[u8]) -> Option<f64> {
+        lexical_core::parse(string).ok()
     }
 }
 
-impl Parser for UInt64Type {}
+impl Parser for UInt64Type {
+    fn parse(string: &[u8]) -> Option<u64> {
+        lexical_core::parse(string).ok()
+    }
+}
 
-impl Parser for UInt32Type {}
+impl Parser for UInt32Type {
+    fn parse(string: &[u8]) -> Option<u32> {
+        lexical_core::parse(string).ok()
+    }
+}
 
-impl Parser for UInt16Type {}
+impl Parser for UInt16Type {
+    fn parse(string: &[u8]) -> Option<u16> {
+        lexical_core::parse(string).ok()
+    }
+}
 
-impl Parser for UInt8Type {}
+impl Parser for UInt8Type {
+    fn parse(string: &[u8]) -> Option<u8> {
+        lexical_core::parse(string).ok()
+    }
+}
 
-impl Parser for Int64Type {}
+impl Parser for Int64Type {
+    fn parse(string: &[u8]) -> Option<i64> {
+        lexical_core::parse(string).ok()
+    }
+}
 
-impl Parser for Int32Type {}
+impl Parser for Int32Type {
+    fn parse(string: &[u8]) -> Option<i32> {
+        lexical_core::parse(string).ok()
+    }
+}
 
-impl Parser for Int16Type {}
+impl Parser for Int16Type {
+    fn parse(string: &[u8]) -> Option<i16> {
+        lexical_core::parse(string).ok()
+    }
+}
 
-impl Parser for Int8Type {}
+impl Parser for Int8Type {
+    fn parse(string: &[u8]) -> Option<i8> {
+        lexical_core::parse(string).ok()
+    }
+}
 
-fn parse_item<T: Parser>(string: &str) -> Option<T::Native> {
-    T::parse(string)
+fn parse_item<T: Parser>(bytes: &[u8]) -> Option<T::Native> {
+    T::parse(bytes)
 }
 
 // parses a specific column (col_idx) into an Arrow Array.
 fn build_primitive_array<T: ArrowPrimitiveType + Parser>(
     line_number: usize,
-    rows: &[StringRecord],
+    rows: &[ByteRecord],
     col_idx: usize,
 ) -> Result<ArrayRef> {
     rows.iter()
@@ -538,7 +584,7 @@ fn build_primitive_array<T: ArrowPrimitiveType + Parser>(
                         None => Err(ArrowError::ParseError(format!(
                             // TODO: we should surface the underlying error here.
                             "Error while parsing value {} for column {} at line {}",
-                            s,
+                            &std::str::from_utf8(s).unwrap_or("invalid utf-8 string"),
                             col_idx,
                             line_number + row_index
                         ))),
@@ -1062,39 +1108,39 @@ mod tests {
     #[test]
     fn test_parsing_bool() {
         // Encode the expected behavior of boolean parsing
-        assert_eq!(Some(true), parse_item::<BooleanType>("true"));
-        assert_eq!(Some(true), parse_item::<BooleanType>("tRUe"));
-        assert_eq!(Some(true), parse_item::<BooleanType>("True"));
-        assert_eq!(Some(true), parse_item::<BooleanType>("TRUE"));
-        assert_eq!(None, parse_item::<BooleanType>("t"));
-        assert_eq!(None, parse_item::<BooleanType>("T"));
-        assert_eq!(None, parse_item::<BooleanType>(""));
+        assert_eq!(Some(true), parse_item::<BooleanType>("true".as_bytes()));
+        assert_eq!(Some(true), parse_item::<BooleanType>("tRUe".as_bytes()));
+        assert_eq!(Some(true), parse_item::<BooleanType>("True".as_bytes()));
+        assert_eq!(Some(true), parse_item::<BooleanType>("TRUE".as_bytes()));
+        assert_eq!(None, parse_item::<BooleanType>("t".as_bytes()));
+        assert_eq!(None, parse_item::<BooleanType>("T".as_bytes()));
+        assert_eq!(None, parse_item::<BooleanType>("".as_bytes()));
 
-        assert_eq!(Some(false), parse_item::<BooleanType>("false"));
-        assert_eq!(Some(false), parse_item::<BooleanType>("fALse"));
-        assert_eq!(Some(false), parse_item::<BooleanType>("False"));
-        assert_eq!(Some(false), parse_item::<BooleanType>("FALSE"));
-        assert_eq!(None, parse_item::<BooleanType>("f"));
-        assert_eq!(None, parse_item::<BooleanType>("F"));
-        assert_eq!(None, parse_item::<BooleanType>(""));
+        assert_eq!(Some(false), parse_item::<BooleanType>("false".as_bytes()));
+        assert_eq!(Some(false), parse_item::<BooleanType>("fALse".as_bytes()));
+        assert_eq!(Some(false), parse_item::<BooleanType>("False".as_bytes()));
+        assert_eq!(Some(false), parse_item::<BooleanType>("FALSE".as_bytes()));
+        assert_eq!(None, parse_item::<BooleanType>("f".as_bytes()));
+        assert_eq!(None, parse_item::<BooleanType>("F".as_bytes()));
+        assert_eq!(None, parse_item::<BooleanType>("".as_bytes()));
     }
 
     #[test]
     fn test_parsing_float() {
-        assert_eq!(Some(12.34), parse_item::<Float64Type>("12.34"));
-        assert_eq!(Some(-12.34), parse_item::<Float64Type>("-12.34"));
-        assert_eq!(Some(12.0), parse_item::<Float64Type>("12"));
-        assert_eq!(Some(0.0), parse_item::<Float64Type>("0"));
-        assert!(parse_item::<Float64Type>("nan").unwrap().is_nan());
-        assert!(parse_item::<Float64Type>("NaN").unwrap().is_nan());
-        assert!(parse_item::<Float64Type>("inf").unwrap().is_infinite());
-        assert!(parse_item::<Float64Type>("inf").unwrap().is_sign_positive());
-        assert!(parse_item::<Float64Type>("-inf").unwrap().is_infinite());
-        assert!(parse_item::<Float64Type>("-inf")
+        assert_eq!(Some(12.34), parse_item::<Float64Type>("12.34".as_bytes()));
+        assert_eq!(Some(-12.34), parse_item::<Float64Type>("-12.34".as_bytes()));
+        assert_eq!(Some(12.0), parse_item::<Float64Type>("12".as_bytes()));
+        assert_eq!(Some(0.0), parse_item::<Float64Type>("0".as_bytes()));
+        assert!(parse_item::<Float64Type>("nan".as_bytes()).unwrap().is_nan());
+        assert!(parse_item::<Float64Type>("NaN".as_bytes()).unwrap().is_nan());
+        assert!(parse_item::<Float64Type>("inf".as_bytes()).unwrap().is_infinite());
+        assert!(parse_item::<Float64Type>("inf".as_bytes()).unwrap().is_sign_positive());
+        assert!(parse_item::<Float64Type>("-inf".as_bytes()).unwrap().is_infinite());
+        assert!(parse_item::<Float64Type>("-inf".as_bytes())
             .unwrap()
             .is_sign_negative());
-        assert_eq!(None, parse_item::<Float64Type>(""));
-        assert_eq!(None, parse_item::<Float64Type>("dd"));
-        assert_eq!(None, parse_item::<Float64Type>("12.34.56"));
+        assert_eq!(None, parse_item::<Float64Type>("".as_bytes()));
+        assert_eq!(None, parse_item::<Float64Type>("dd".as_bytes()));
+        assert_eq!(None, parse_item::<Float64Type>("12.34.56".as_bytes()));
     }
 }
