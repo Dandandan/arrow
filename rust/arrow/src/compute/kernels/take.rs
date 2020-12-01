@@ -470,8 +470,7 @@ where
             }
         }
         nulls = Some(null_buf.freeze());
-    }
-    if true {
+    } else {
         let num_bytes = bit_util::ceil(data_len, 8);
         let mut null_buf = MutableBuffer::new(num_bytes).with_bitset(num_bytes, true);
         let null_slice = null_buf.data_mut();
