@@ -424,7 +424,7 @@ where
         }
     }
 
-    let mut nulls = None;
+    let nulls;
 
     // Now we know the total length and allocate the value buffer using length_so_far
     // So we use this to allocate a new mutable buffer
