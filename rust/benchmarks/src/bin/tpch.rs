@@ -128,10 +128,12 @@ async fn benchmark(opt: BenchmarkOpt) -> Result<()> {
     }
 
     // run benchmark
+    let mut timings = vec![];
     for i in 0..opt.iterations {
         let start = Instant::now();
         let plan = create_logical_plan(&mut ctx, opt.query)?;
         execute_query(&mut ctx, &plan, opt.debug).await?;
+        timings.push(start.elapsed().as_millis() as u64);
         println!(
             "Query {} iteration {} took {} ms",
             opt.query,
@@ -139,6 +141,8 @@ async fn benchmark(opt: BenchmarkOpt) -> Result<()> {
             start.elapsed().as_millis()
         );
     }
+    let avg = timings.iter().sum::<u64>() / timings.len() as u64;
+    println!("Query {} Avg: {} ms", opt.query, avg);
 
     Ok(())
 }

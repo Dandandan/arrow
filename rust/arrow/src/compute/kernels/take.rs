@@ -365,31 +365,30 @@ where
         .as_any()
         .downcast_ref::<GenericStringArray<OffsetSize>>()
         .unwrap();
+    let bytes_offset = (data_len + 1) * std::mem::size_of::<OffsetSize>();
+    let mut offsets_buffer = MutableBuffer::new(bytes_offset);
+    offsets_buffer.resize(bytes_offset);
+    let offsets = offsets_buffer.typed_data_mut();
 
-    let num_bytes = bit_util::ceil(data_len, 8);
-
-    let null_count = array.null_count();
-    let mut offsets = Vec::with_capacity(data_len + 1);
-    let mut values = Vec::with_capacity(data_len);
     let mut length_so_far = OffsetSize::zero();
-    offsets.push(length_so_far);
+    offsets[0] = length_so_far;
 
-    let nulls;
-    if null_count == 0 && indices.null_count() == 0 {
-        for i in 0..data_len {
+    //
+    // 1. Calculate the offset values and the total amount of so far based on string length
+    // 2. Use the last `length_so_far` to create a new string array
+    // Based on whether the values or indices are null we can skip checks
+    if array.null_count() == 0 && indices.null_count() == 0 {
+        for (i, offset) in offsets.iter_mut().skip(1).enumerate() {
             let index = ToPrimitive::to_usize(&indices.value(i)).ok_or_else(|| {
                 ArrowError::ComputeError("Cast to usize failed".to_string())
             })?;
 
             let s = array.value(index);
-
             length_so_far += OffsetSize::from_usize(s.len()).unwrap();
-            values.extend_from_slice(s.as_bytes());
-            offsets.push(length_so_far);
+            *offset = length_so_far;
         }
-        nulls = None
-    } else if null_count == 0 {
-        for i in 0..data_len {
+    } else if array.null_count() == 0 {
+        for (i, offset) in offsets.iter_mut().skip(1).enumerate() {
             if indices.is_valid(i) {
                 let index =
                     ToPrimitive::to_usize(&indices.value(i)).ok_or_else(|| {
@@ -397,14 +396,83 @@ where
                     })?;
 
                 let s = array.value(index);
-
                 length_so_far += OffsetSize::from_usize(s.len()).unwrap();
-                values.extend_from_slice(s.as_bytes());
             }
-            offsets.push(length_so_far);
+            *offset = length_so_far;
+        }
+    } else if indices.null_count() == 0 {
+        for (i, offset) in offsets.iter_mut().skip(1).enumerate() {
+            let index = ToPrimitive::to_usize(&indices.value(i)).ok_or_else(|| {
+                ArrowError::ComputeError("Cast to usize failed".to_string())
+            })?;
+            if array.is_valid(index) {
+                let s = array.value(index);
+                length_so_far += OffsetSize::from_usize(s.len()).unwrap();
+            }
+            *offset = length_so_far;
+        }
+    } else {
+        for (i, offset) in offsets.iter_mut().skip(1).enumerate() {
+            let index = ToPrimitive::to_usize(&indices.value(i)).ok_or_else(|| {
+                ArrowError::ComputeError("Cast to usize failed".to_string())
+            })?;
+            if array.is_valid(index) && indices.is_valid(i) {
+                let s = array.value(index);
+                length_so_far += OffsetSize::from_usize(s.len()).unwrap();
+            }
+            *offset = length_so_far;
+        }
+    }
+
+    let mut nulls = None;
+
+    // Now we know the total length and allocate the value buffer using length_so_far
+    // So we use this to allocate a new mutable buffer
+    let mut value_buffer = MutableBuffer::new(length_so_far.to_usize().unwrap());
+
+    if array.null_count() == 0 && indices.null_count() == 0 {
+        for i in 0..data_len {
+            let index = ToPrimitive::to_usize(&indices.value(i)).ok_or_else(|| {
+                ArrowError::ComputeError("Cast to usize failed".to_string())
+            })?;
+            let s = array.value(index);
+            value_buffer.extend_from_slice(s.as_bytes());
+        }
+        nulls = None
+    } else if array.null_count() == 0 {
+        for i in 0..data_len {
+            if indices.is_valid(i) {
+                let index =
+                    ToPrimitive::to_usize(&indices.value(i)).ok_or_else(|| {
+                        ArrowError::ComputeError("Cast to usize failed".to_string())
+                    })?;
+                let s = array.value(index);
+                value_buffer.extend_from_slice(s.as_bytes());
+            }
         }
         nulls = indices.data_ref().null_buffer().cloned();
-    } else {
+    } else if indices.null_count() == 0 {
+        let num_bytes = bit_util::ceil(data_len, 8);
+        let mut null_buf = MutableBuffer::new(num_bytes).with_bitset(num_bytes, true);
+        let null_slice = null_buf.data_mut();
+
+        for i in 0..data_len {
+            let index = ToPrimitive::to_usize(&indices.value(i)).ok_or_else(|| {
+                ArrowError::ComputeError("Cast to usize failed".to_string())
+            })?;
+
+            if array.is_valid(index) {
+                let s = array.value(index);
+                value_buffer.extend_from_slice(s.as_bytes());
+            } else {
+                // set null bit
+                bit_util::unset_bit(null_slice, i);
+            }
+        }
+        nulls = Some(null_buf.freeze());
+    }
+    if true {
+        let num_bytes = bit_util::ceil(data_len, 8);
         let mut null_buf = MutableBuffer::new(num_bytes).with_bitset(num_bytes, true);
         let null_slice = null_buf.data_mut();
 
@@ -415,16 +483,12 @@ where
 
             if array.is_valid(index) && indices.is_valid(i) {
                 let s = array.value(index);
-
-                length_so_far += OffsetSize::from_usize(s.len()).unwrap();
-                values.extend_from_slice(s.as_bytes());
+                value_buffer.extend_from_slice(s.as_bytes());
             } else {
                 // set null bit
                 bit_util::unset_bit(null_slice, i);
             }
-            offsets.push(length_so_far);
         }
-
         nulls = match indices.data_ref().null_buffer() {
             Some(buffer) => {
                 Some(buffer_bin_and(buffer, 0, &null_buf.freeze(), 0, data_len))
@@ -435,8 +499,8 @@ where
 
     let mut data = ArrayData::builder(<OffsetSize as StringOffsetSizeTrait>::DATA_TYPE)
         .len(data_len)
-        .add_buffer(Buffer::from(offsets.to_byte_slice()))
-        .add_buffer(Buffer::from(&values[..]));
+        .add_buffer(offsets_buffer.freeze())
+        .add_buffer(value_buffer.freeze());
     if let Some(null_buffer) = nulls {
         data = data.null_bit_buffer(null_buffer);
     }
