@@ -67,6 +67,9 @@ fn calculate_statistics(
             .iter()
             .map(|null_count| ColumnStatistics {
                 null_count: Some(*null_count),
+                min_value: None,
+                max_value: None,
+                distinct_count: None,
             })
             .collect(),
     );
@@ -217,16 +220,28 @@ mod tests {
             provider.statistics().column_statistics,
             Some(vec![
                 ColumnStatistics {
-                    null_count: Some(0)
+                    null_count: Some(0),
+                    min_value: None,
+                    max_value: None,
+                    distinct_count: None,
                 },
                 ColumnStatistics {
-                    null_count: Some(0)
+                    null_count: Some(0),
+                    min_value: None,
+                    max_value: None,
+                    distinct_count: None,
                 },
                 ColumnStatistics {
-                    null_count: Some(0)
+                    null_count: Some(0),
+                    min_value: None,
+                    max_value: None,
+                    distinct_count: None,
                 },
                 ColumnStatistics {
-                    null_count: Some(2)
+                    null_count: Some(2),
+                    min_value: None,
+                    max_value: None,
+                    distinct_count: None,
                 },
             ])
         );

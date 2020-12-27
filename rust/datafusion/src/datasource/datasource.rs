@@ -20,11 +20,10 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use crate::arrow::datatypes::SchemaRef;
 use crate::error::Result;
 use crate::logical_plan::Expr;
 use crate::physical_plan::ExecutionPlan;
-
+use crate::{arrow::datatypes::SchemaRef, scalar::ScalarValue};
 /// This table statistics are estimates.
 /// It can not be used directly in the precise compute
 #[derive(Debug, Clone, Default)]
@@ -41,6 +40,12 @@ pub struct Statistics {
 pub struct ColumnStatistics {
     /// Number of null values on column
     pub null_count: Option<usize>,
+    /// Number of null values on column
+    pub distinct_count: Option<usize>,
+    /// Minimum value
+    pub min_value: Option<ScalarValue>,
+    /// Maximum value
+    pub max_value: Option<ScalarValue>,
 }
 
 /// Indicates whether and how a filter expression can be handled by a
@@ -88,5 +93,11 @@ pub trait TableProvider {
         _filter: &Expr,
     ) -> Result<TableProviderFilterPushDown> {
         Ok(TableProviderFilterPushDown::Unsupported)
+    }
+
+    /// Analyze the table and add statistics
+    fn analyze(&mut self) -> Result<()> {
+        // TODO: default implementation
+        Ok(())
     }
 }
