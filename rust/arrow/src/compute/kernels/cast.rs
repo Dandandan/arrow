@@ -925,8 +925,8 @@ where
 /// Cast numeric types to Utf8
 fn cast_string_to_numeric<T>(from: &ArrayRef) -> Result<ArrayRef>
 where
-    T: ArrowNumericType,
-    <T as ArrowPrimitiveType>::Native: lexical_core::FromLexical
+    T: ArrowPrimitiveType,
+    T::Native: lexical_core::FromLexical,
 {
     Ok(Arc::new(string_to_numeric_cast::<T>(
         from.as_any().downcast_ref::<StringArray>().unwrap(),
@@ -935,8 +935,8 @@ where
 
 fn string_to_numeric_cast<T>(from: &StringArray) -> PrimitiveArray<T>
 where
-    T: ArrowNumericType,
-    <T as ArrowPrimitiveType>::Native: lexical_core::FromLexical
+    T: ArrowPrimitiveType,
+    T::Native: lexical_core::FromLexical,
 {
     (0..from.len())
         .map(|i| {
