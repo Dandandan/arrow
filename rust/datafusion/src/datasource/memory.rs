@@ -31,7 +31,7 @@ use crate::error::{DataFusionError, Result};
 use crate::physical_plan::common;
 use crate::physical_plan::memory::MemoryExec;
 use crate::physical_plan::ExecutionPlan;
-
+use crate::prelude::*;
 /// In-memory table
 pub struct MemTable {
     schema: SchemaRef,
@@ -92,6 +92,24 @@ impl MemTable {
         }
 
         MemTable::try_new(schema.clone(), data)
+    }
+
+    async fn analyze(self) -> Result<()> {
+        let mut ctx = ExecutionContext::new();
+        let x = Arc::new(self);
+        let x = ctx.read_table(x)?;
+
+        let names = x
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.name())
+            .flat_map(|name| vec![min(col(name)), max(col(name))])
+            .collect();
+        let agg = x.aggregate(vec![], names)?;
+        let res = agg.collect().await;
+        //debug!("Collected stast")
+        Ok(())
     }
 }
 
