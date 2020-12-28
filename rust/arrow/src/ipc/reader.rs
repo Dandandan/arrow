@@ -590,7 +590,10 @@ impl<R: Read + Seek> FileReader<R> {
         let mut footer_data = vec![0; footer_len as usize];
         reader.seek(SeekFrom::End(-10 - footer_len as i64))?;
         reader.read_exact(&mut footer_data)?;
-        let footer = ipc::get_root_as_footer(&footer_data[..]);
+
+        let footer = ipc::root_as_footer(&footer_data[..]).map_err(|err| {
+            ArrowError::IoError(format!("Unable to get root as footer: {:?}", err))
+        })?;
 
         let blocks = footer.recordBatches().ok_or_else(|| {
             ArrowError::IoError(
@@ -621,7 +624,9 @@ impl<R: Read + Seek> FileReader<R> {
 
             reader.read_exact(&mut block_data)?;
 
-            let message = ipc::get_root_as_message(&block_data[..]);
+            let message = ipc::root_as_message(&block_data[..]).map_err(|err| {
+                ArrowError::IoError(format!("Unable to get root as message: {:?}", err))
+            })?;
 
             match message.header_type() {
                 ipc::MessageHeader::DictionaryBatch => {
@@ -698,7 +703,9 @@ impl<R: Read + Seek> FileReader<R> {
         let mut block_data = vec![0; meta_len as usize];
         self.reader.read_exact(&mut block_data)?;
 
-        let message = ipc::get_root_as_message(&block_data[..]);
+        let message = ipc::root_as_message(&block_data[..]).map_err(|err| {
+            ArrowError::IoError(format!("Unable to get root as footer: {:?}", err))
+        })?;
 
         // some old test data's footer metadata is not set, so we account for that
         if self.metadata_version != ipc::MetadataVersion::V1
@@ -804,7 +811,9 @@ impl<R: Read> StreamReader<R> {
         let mut meta_buffer = vec![0; meta_len as usize];
         reader.read_exact(&mut meta_buffer)?;
 
-        let message = ipc::get_root_as_message(meta_buffer.as_slice());
+        let message = ipc::root_as_message(meta_buffer.as_slice()).map_err(|err| {
+            ArrowError::IoError(format!("Unable to get root as message: {:?}", err))
+        })?;
         // message header is a Schema, so read it
         let ipc_schema: ipc::Schema = message.header_as_schema().ok_or_else(|| {
             ArrowError::IoError("Unable to read IPC message as schema".to_string())
@@ -873,7 +882,9 @@ impl<R: Read> StreamReader<R> {
         self.reader.read_exact(&mut meta_buffer)?;
 
         let vecs = &meta_buffer.to_vec();
-        let message = ipc::get_root_as_message(vecs);
+        let message = ipc::root_as_message(vecs).map_err(|err| {
+            ArrowError::IoError(format!("Unable to get root as message: {:?}", err))
+        })?;
 
         match message.header_type() {
             ipc::MessageHeader::Schema => Err(ArrowError::IoError(
@@ -939,12 +950,11 @@ mod tests {
     use flate2::read::GzDecoder;
 
     use crate::util::integration_util::*;
-    use std::env;
     use std::fs::File;
 
     #[test]
     fn read_generated_files() {
-        let testdata = env::var("ARROW_TEST_DATA").expect("ARROW_TEST_DATA not defined");
+        let testdata = crate::util::test_util::arrow_test_data();
         // the test is repetitive, thus we can read all supported files at once
         let paths = vec![
             "generated_interval",
@@ -974,7 +984,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Big Endian is not supported for Decimal!")]
     fn read_decimal_be_file_should_panic() {
-        let testdata = env::var("ARROW_TEST_DATA").expect("ARROW_TEST_DATA not defined");
+        let testdata = crate::util::test_util::arrow_test_data();
         let file = File::open(format!(
                 "{}/arrow-ipc-stream/integration/1.0.0-bigendian/generated_decimal.arrow_file",
                 testdata
@@ -986,7 +996,7 @@ mod tests {
     #[test]
     fn read_generated_be_files_should_work() {
         // complementary to the previous test
-        let testdata = env::var("ARROW_TEST_DATA").expect("ARROW_TEST_DATA not defined");
+        let testdata = crate::util::test_util::arrow_test_data();
         let paths = vec![
             "generated_interval",
             "generated_datetime",
@@ -1009,7 +1019,7 @@ mod tests {
 
     #[test]
     fn read_generated_streams() {
-        let testdata = env::var("ARROW_TEST_DATA").expect("ARROW_TEST_DATA not defined");
+        let testdata = crate::util::test_util::arrow_test_data();
         // the test is repetitive, thus we can read all supported files at once
         let paths = vec![
             "generated_interval",
@@ -1091,7 +1101,7 @@ mod tests {
 
     /// Read gzipped JSON file
     fn read_gzip_json(path: &str) -> ArrowJson {
-        let testdata = env::var("ARROW_TEST_DATA").expect("ARROW_TEST_DATA not defined");
+        let testdata = crate::util::test_util::arrow_test_data();
         let file = File::open(format!(
             "{}/arrow-ipc-stream/integration/0.14.1/{}.json.gz",
             testdata, path

@@ -163,7 +163,7 @@ pub fn like_utf8(left: &StringArray, right: &StringArray) -> Result<BooleanArray
             map.get(pat).unwrap()
         };
 
-        result.append(re.is_match(haystack))?;
+        result.append(re.is_match(haystack));
     }
 
     let data = ArrayData::new(
@@ -189,18 +189,18 @@ pub fn like_utf8_scalar(left: &StringArray, right: &str) -> Result<BooleanArray>
     if !right.contains(is_like_pattern) {
         // fast path, can use equals
         for i in 0..left.len() {
-            result.append(left.value(i) == right)?;
+            result.append(left.value(i) == right);
         }
     } else if right.ends_with('%') && !right[..right.len() - 1].contains(is_like_pattern)
     {
         // fast path, can use starts_with
         for i in 0..left.len() {
-            result.append(left.value(i).starts_with(&right[..right.len() - 1]))?;
+            result.append(left.value(i).starts_with(&right[..right.len() - 1]));
         }
     } else if right.starts_with('%') && !right[1..].contains(is_like_pattern) {
         // fast path, can use ends_with
         for i in 0..left.len() {
-            result.append(left.value(i).ends_with(&right[1..]))?;
+            result.append(left.value(i).ends_with(&right[1..]));
         }
     } else {
         let re_pattern = right.replace("%", ".*").replace("_", ".");
@@ -213,7 +213,7 @@ pub fn like_utf8_scalar(left: &StringArray, right: &str) -> Result<BooleanArray>
 
         for i in 0..left.len() {
             let haystack = left.value(i);
-            result.append(re.is_match(haystack))?;
+            result.append(re.is_match(haystack));
         }
     };
 
@@ -259,7 +259,7 @@ pub fn nlike_utf8(left: &StringArray, right: &StringArray) -> Result<BooleanArra
             map.get(pat).unwrap()
         };
 
-        result.append(!re.is_match(haystack))?;
+        result.append(!re.is_match(haystack));
     }
 
     let data = ArrayData::new(
@@ -281,18 +281,18 @@ pub fn nlike_utf8_scalar(left: &StringArray, right: &str) -> Result<BooleanArray
     if !right.contains(is_like_pattern) {
         // fast path, can use equals
         for i in 0..left.len() {
-            result.append(left.value(i) != right)?;
+            result.append(left.value(i) != right);
         }
     } else if right.ends_with('%') && !right[..right.len() - 1].contains(is_like_pattern)
     {
         // fast path, can use ends_with
         for i in 0..left.len() {
-            result.append(!left.value(i).starts_with(&right[..right.len() - 1]))?;
+            result.append(!left.value(i).starts_with(&right[..right.len() - 1]));
         }
     } else if right.starts_with('%') && !right[1..].contains(is_like_pattern) {
         // fast path, can use starts_with
         for i in 0..left.len() {
-            result.append(!left.value(i).ends_with(&right[1..]))?;
+            result.append(!left.value(i).ends_with(&right[1..]));
         }
     } else {
         let re_pattern = right.replace("%", ".*").replace("_", ".");
@@ -304,7 +304,7 @@ pub fn nlike_utf8_scalar(left: &StringArray, right: &str) -> Result<BooleanArray
         })?;
         for i in 0..left.len() {
             let haystack = left.value(i);
-            result.append(!re.is_match(haystack))?;
+            result.append(!re.is_match(haystack));
         }
     }
 
@@ -398,8 +398,8 @@ where
     let rem = len % lanes;
 
     for i in (0..len - rem).step_by(lanes) {
-        let simd_left = T::load(left.value_slice(i, lanes));
-        let simd_right = T::load(right.value_slice(i, lanes));
+        let simd_left = T::load(unsafe { left.value_slice(i, lanes) });
+        let simd_right = T::load(unsafe { right.value_slice(i, lanes) });
         let simd_result = op(simd_left, simd_right);
         T::bitmask(&simd_result, |b| {
             result.extend_from_slice(b);
@@ -407,8 +407,10 @@ where
     }
 
     if rem > 0 {
-        let simd_left = T::load(left.value_slice(len - rem, lanes));
-        let simd_right = T::load(right.value_slice(len - rem, lanes));
+        //Soundness
+        //	This is not sound because it can read past the end of PrimitiveArray buffer (lanes is always greater than rem), see ARROW-10990
+        let simd_left = T::load(unsafe { left.value_slice(len - rem, lanes) });
+        let simd_right = T::load(unsafe { right.value_slice(len - rem, lanes) });
         let simd_result = op(simd_left, simd_right);
         let rem_buffer_size = (rem as f32 / 8f32).ceil() as usize;
         T::bitmask(&simd_result, |b| {
@@ -451,7 +453,7 @@ where
     let rem = len % lanes;
 
     for i in (0..len - rem).step_by(lanes) {
-        let simd_left = T::load(left.value_slice(i, lanes));
+        let simd_left = T::load(unsafe { left.value_slice(i, lanes) });
         let simd_result = op(simd_left, simd_right);
         T::bitmask(&simd_result, |b| {
             result.extend_from_slice(b);
@@ -459,7 +461,9 @@ where
     }
 
     if rem > 0 {
-        let simd_left = T::load(left.value_slice(len - rem, lanes));
+        //Soundness
+        //	This is not sound because it can read past the end of PrimitiveArray buffer (lanes is always greater than rem), see ARROW-10990
+        let simd_left = T::load(unsafe { left.value_slice(len - rem, lanes) });
         let simd_result = op(simd_left, simd_right);
         let rem_buffer_size = (rem as f32 / 8f32).ceil() as usize;
         T::bitmask(&simd_result, |b| {

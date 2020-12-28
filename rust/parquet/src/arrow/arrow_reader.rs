@@ -235,7 +235,8 @@ impl ParquetRecordBatchReader {
 mod tests {
     use crate::arrow::arrow_reader::{ArrowReader, ParquetFileArrowReader};
     use crate::arrow::converter::{
-        Converter, FixedSizeArrayConverter, FromConverter, Utf8ArrayConverter,
+        Converter, FixedSizeArrayConverter, FromConverter, IntervalDayTimeArrayConverter,
+        Utf8ArrayConverter,
     };
     use crate::column::writer::get_typed_column_writer_mut;
     use crate::data_type::{
@@ -249,16 +250,13 @@ mod tests {
     use crate::schema::parser::parse_message_type;
     use crate::schema::types::TypePtr;
     use crate::util::test_common::{get_temp_filename, RandGen};
-    use arrow::array::{
-        Array, BooleanArray, FixedSizeBinaryArray, StringArray, StructArray,
-    };
+    use arrow::array::*;
     use arrow::record_batch::RecordBatchReader;
     use rand::RngCore;
     use serde_json::json;
     use serde_json::Value::{Array as JArray, Null as JNull, Object as JObject};
     use std::cmp::min;
     use std::convert::TryFrom;
-    use std::env;
     use std::fs::File;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -362,6 +360,23 @@ mod tests {
         >(20, message_type, &converter);
     }
 
+    #[test]
+    fn test_interval_day_time_column_reader() {
+        let message_type = "
+        message test_schema {
+          REQUIRED FIXED_LEN_BYTE_ARRAY (12) leaf (INTERVAL);
+        }
+        ";
+
+        let converter = IntervalDayTimeArrayConverter {};
+        run_single_column_reader_tests::<
+            FixedLenByteArrayType,
+            IntervalDayTimeArray,
+            IntervalDayTimeArrayConverter,
+            RandFixedLenGen,
+        >(12, message_type, &converter);
+    }
+
     struct RandUtf8Gen {}
 
     impl RandGen<ByteArrayType> for RandUtf8Gen {
@@ -390,8 +405,7 @@ mod tests {
     #[test]
     fn test_read_decimal_file() {
         use arrow::array::DecimalArray;
-        let testdata =
-            env::var("PARQUET_TEST_DATA").expect("PARQUET_TEST_DATA not defined");
+        let testdata = arrow::util::test_util::parquet_test_data();
         let path = format!("{}/fixed_length_decimal.parquet", testdata);
         let parquet_reader =
             SerializedFileReader::try_from(File::open(&path).unwrap()).unwrap();
@@ -591,7 +605,7 @@ mod tests {
 
     fn get_test_file(file_name: &str) -> File {
         let mut path = PathBuf::new();
-        path.push(env::var("ARROW_TEST_DATA").expect("ARROW_TEST_DATA not defined!"));
+        path.push(arrow::util::test_util::arrow_test_data());
         path.push(file_name);
 
         File::open(path.as_path()).expect("File not found!")

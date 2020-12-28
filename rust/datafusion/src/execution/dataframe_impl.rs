@@ -24,6 +24,7 @@ use crate::error::Result;
 use crate::execution::context::{ExecutionContext, ExecutionContextState};
 use crate::logical_plan::{
     col, DFSchema, Expr, FunctionRegistry, JoinType, LogicalPlan, LogicalPlanBuilder,
+    Partitioning,
 };
 use crate::{arrow::record_batch::RecordBatch, physical_plan::collect};
 
@@ -107,6 +108,16 @@ impl DataFrame for DataFrameImpl {
     ) -> Result<Arc<dyn DataFrame>> {
         let plan = LogicalPlanBuilder::from(&self.plan)
             .join(&right.to_logical_plan(), join_type, left_cols, right_cols)?
+            .build()?;
+        Ok(Arc::new(DataFrameImpl::new(self.ctx_state.clone(), &plan)))
+    }
+
+    fn repartition(
+        &self,
+        partitioning_scheme: Partitioning,
+    ) -> Result<Arc<dyn DataFrame>> {
+        let plan = LogicalPlanBuilder::from(&self.plan)
+            .repartition(partitioning_scheme)?
             .build()?;
         Ok(Arc::new(DataFrameImpl::new(self.ctx_state.clone(), &plan)))
     }
@@ -323,7 +334,7 @@ mod tests {
 
     fn register_aggregate_csv(ctx: &mut ExecutionContext) -> Result<()> {
         let schema = test::aggr_test_schema();
-        let testdata = test::arrow_testdata_path();
+        let testdata = arrow::util::test_util::arrow_test_data();
         ctx.register_csv(
             "aggregate_test_100",
             &format!("{}/csv/aggregate_test_100.csv", testdata),

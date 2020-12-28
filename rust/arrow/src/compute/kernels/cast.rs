@@ -380,7 +380,7 @@ pub fn cast(array: &ArrayRef, to_type: &DataType) -> Result<ArrayRef> {
             Float32 => cast_string_to_numeric::<Float32Type>(array),
             Float64 => cast_string_to_numeric::<Float64Type>(array),
             Date32(DateUnit::Day) => {
-                let zero_time = chrono::NaiveTime::from_hms(0, 0, 0);
+                use chrono::Datelike;
                 let string_array = array.as_any().downcast_ref::<StringArray>().unwrap();
                 let mut builder = PrimitiveBuilder::<Date32Type>::new(string_array.len());
                 for i in 0..string_array.len() {
@@ -389,8 +389,7 @@ pub fn cast(array: &ArrayRef, to_type: &DataType) -> Result<ArrayRef> {
                     } else {
                         match string_array.value(i).parse::<chrono::NaiveDate>() {
                             Ok(date) => builder.append_value(
-                                (date.and_time(zero_time).timestamp() / SECONDS_IN_DAY)
-                                    as i32,
+                                date.num_days_from_ce() - EPOCH_DAYS_FROM_CE,
                             )?,
                             Err(_) => builder.append_null()?, // not a valid date
                         };
@@ -835,6 +834,8 @@ const MICROSECONDS: i64 = 1_000_000;
 const NANOSECONDS: i64 = 1_000_000_000;
 /// Number of milliseconds in a day
 const MILLISECONDS_IN_DAY: i64 = SECONDS_IN_DAY * MILLISECONDS;
+/// Number of days between 0001-01-01 and 1970-01-01
+const EPOCH_DAYS_FROM_CE: i32 = 719_163;
 
 /// Cast an array by changing its array_data type to the desired type
 ///
@@ -881,10 +882,7 @@ where
     R::Native: num::NumCast,
 {
     from.iter()
-        .map(|v| match v {
-            Some(v) => num::cast::cast::<T::Native, R::Native>(v),
-            None => None,
-        })
+        .map(|v| v.and_then(num::cast::cast::<T::Native, R::Native>))
         .collect()
 }
 
@@ -922,11 +920,12 @@ where
 }
 
 /// Cast numeric types to Utf8
-fn cast_string_to_numeric<TO>(from: &ArrayRef) -> Result<ArrayRef>
+fn cast_string_to_numeric<T>(from: &ArrayRef) -> Result<ArrayRef>
 where
-    TO: ArrowNumericType,
+    T: ArrowNumericType,
+    <T as ArrowPrimitiveType>::Native: lexical_core::FromLexical,
 {
-    Ok(Arc::new(string_to_numeric_cast::<TO>(
+    Ok(Arc::new(string_to_numeric_cast::<T>(
         from.as_any().downcast_ref::<StringArray>().unwrap(),
     )))
 }
@@ -934,16 +933,14 @@ where
 fn string_to_numeric_cast<T>(from: &StringArray) -> PrimitiveArray<T>
 where
     T: ArrowNumericType,
+    <T as ArrowPrimitiveType>::Native: lexical_core::FromLexical,
 {
     (0..from.len())
         .map(|i| {
             if from.is_null(i) {
                 None
             } else {
-                match from.value(i).parse::<T::Native>() {
-                    Ok(v) => Some(v),
-                    Err(_) => None,
-                }
+                lexical_core::parse(from.value(i).as_bytes()).ok()
             }
         })
         .collect()
@@ -1122,7 +1119,7 @@ where
                 )
             })?;
 
-    take(&cast_dict_values, u32_indicies, None)
+    take(cast_dict_values.as_ref(), u32_indicies, None)
 }
 
 /// Attempts to encode an array into an `ArrayDictionary` with index
@@ -2761,7 +2758,9 @@ mod tests {
 
     #[test]
     fn test_cast_utf8_to_date32() {
-        use chrono::{NaiveDate, NaiveTime};
+        use chrono::NaiveDate;
+        let from_ymd = chrono::NaiveDate::from_ymd;
+        let since = chrono::NaiveDate::signed_duration_since;
 
         let a = StringArray::from(vec![
             "2000-01-01",          // valid date with leading 0s
@@ -2774,19 +2773,14 @@ mod tests {
         let b = cast(&array, &DataType::Date32(DateUnit::Day)).unwrap();
         let c = b.as_any().downcast_ref::<Date32Array>().unwrap();
 
-        let zero_time = NaiveTime::from_hms(0, 0, 0);
         // test valid inputs
-        let date_value = (NaiveDate::from_ymd(2000, 1, 1)
-            .and_time(zero_time)
-            .timestamp()
-            / SECONDS_IN_DAY) as i32;
+        let date_value = since(NaiveDate::from_ymd(2000, 1, 1), from_ymd(1970, 1, 1))
+            .num_days() as i32;
         assert_eq!(true, c.is_valid(0)); // "2000-01-01"
         assert_eq!(date_value, c.value(0));
 
-        let date_value = (NaiveDate::from_ymd(2000, 2, 2)
-            .and_time(zero_time)
-            .timestamp()
-            / SECONDS_IN_DAY) as i32;
+        let date_value = since(NaiveDate::from_ymd(2000, 2, 2), from_ymd(1970, 1, 1))
+            .num_days() as i32;
         assert_eq!(true, c.is_valid(1)); // "2000-2-2"
         assert_eq!(date_value, c.value(1));
 

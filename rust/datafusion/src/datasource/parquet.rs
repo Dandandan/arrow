@@ -22,11 +22,11 @@ use std::string::String;
 use std::sync::Arc;
 
 use arrow::datatypes::*;
-use parquet::file::metadata::RowGroupMetaData;
 
 use crate::datasource::datasource::Statistics;
 use crate::datasource::TableProvider;
 use crate::error::Result;
+use crate::logical_plan::Expr;
 use crate::physical_plan::parquet::ParquetExec;
 use crate::physical_plan::ExecutionPlan;
 
@@ -40,28 +40,12 @@ pub struct ParquetTable {
 impl ParquetTable {
     /// Attempt to initialize a new `ParquetTable` from a file path.
     pub fn try_new(path: &str) -> Result<Self> {
-        let parquet_exec = ParquetExec::try_new(path, None, 0)?;
+        let parquet_exec = ParquetExec::try_from_path(path, None, 0)?;
         let schema = parquet_exec.schema();
-
-        let metadata = parquet_exec.metadata();
-        let num_rows: i64 = metadata
-            .row_groups()
-            .iter()
-            .map(RowGroupMetaData::num_rows)
-            .sum();
-        let total_byte_size: i64 = metadata
-            .row_groups()
-            .iter()
-            .map(RowGroupMetaData::total_byte_size)
-            .sum();
-
         Ok(Self {
             path: path.to_string(),
             schema,
-            statistics: Statistics {
-                num_rows: Some(num_rows as usize),
-                total_byte_size: Some(total_byte_size as usize),
-            },
+            statistics: parquet_exec.statistics().to_owned(),
         })
     }
 }
@@ -82,8 +66,9 @@ impl TableProvider for ParquetTable {
         &self,
         projection: &Option<Vec<usize>>,
         batch_size: usize,
+        _filters: &[Expr],
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(ParquetExec::try_new(
+        Ok(Arc::new(ParquetExec::try_from_path(
             &self.path,
             projection.clone(),
             batch_size,
@@ -104,13 +89,12 @@ mod tests {
     };
     use arrow::record_batch::RecordBatch;
     use futures::StreamExt;
-    use std::env;
 
     #[tokio::test]
     async fn read_small_batches() -> Result<()> {
         let table = load_table("alltypes_plain.parquet")?;
         let projection = None;
-        let exec = table.scan(&projection, 2)?;
+        let exec = table.scan(&projection, 2, &[])?;
         let stream = exec.execute(0).await?;
 
         let count = stream
@@ -324,8 +308,7 @@ mod tests {
     }
 
     fn load_table(name: &str) -> Result<Box<dyn TableProvider>> {
-        let testdata =
-            env::var("PARQUET_TEST_DATA").expect("PARQUET_TEST_DATA not defined");
+        let testdata = arrow::util::test_util::parquet_test_data();
         let filename = format!("{}/{}", testdata, name);
         let table = ParquetTable::try_new(&filename)?;
         Ok(Box::new(table))
@@ -335,7 +318,7 @@ mod tests {
         table: Box<dyn TableProvider>,
         projection: &Option<Vec<usize>>,
     ) -> Result<RecordBatch> {
-        let exec = table.scan(projection, 1024)?;
+        let exec = table.scan(projection, 1024, &[])?;
         let mut it = exec.execute(0).await?;
         it.next()
             .await

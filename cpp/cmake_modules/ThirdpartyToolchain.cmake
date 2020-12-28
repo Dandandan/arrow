@@ -184,7 +184,7 @@ endmacro()
 macro(provide_find_module PACKAGE_NAME)
   set(module_ "${CMAKE_SOURCE_DIR}/cmake_modules/Find${PACKAGE_NAME}.cmake")
   if(EXISTS "${module_}")
-    message(STATUS "Providing cmake module for ${PACKAGE_NAME}")
+    message(STATUS "Providing CMake module for ${PACKAGE_NAME}")
     install(FILES "${module_}" DESTINATION "${ARROW_CMAKE_INSTALL_DIR}")
   endif()
   unset(module_)
@@ -219,9 +219,7 @@ macro(resolve_dependency DEPENDENCY_NAME)
   endif()
   if(${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
     find_package(${FIND_PACKAGE_ARGUMENTS})
-    # CMake 3.2 does uppercase the FOUND variable
-    string(TOUPPER "${PACKAGE_NAME}_FOUND" UPPERCASE_FOUND_VARIABLE)
-    if(${${PACKAGE_NAME}_FOUND} OR "${${UPPERCASE_FOUND_VARIABLE}}")
+    if(${${PACKAGE_NAME}_FOUND})
       set(${DEPENDENCY_NAME}_SOURCE "SYSTEM")
     else()
       build_dependency(${DEPENDENCY_NAME})
@@ -1080,22 +1078,6 @@ if(ARROW_USE_OPENSSL)
   message(STATUS "Found OpenSSL Crypto Library: ${OPENSSL_CRYPTO_LIBRARY}")
   message(STATUS "Building with OpenSSL (Version: ${OPENSSL_VERSION}) support")
 
-  # OpenSSL::SSL and OpenSSL::Crypto were not added to
-  # FindOpenSSL.cmake until version 3.4.0.
-  # https://gitlab.kitware.com/cmake/cmake/blob/75e3a8e811b290cb9921887f2b086377af90880f/Modules/FindOpenSSL.cmake
-  if(NOT TARGET OpenSSL::SSL)
-    add_library(OpenSSL::SSL UNKNOWN IMPORTED)
-    set_target_properties(OpenSSL::SSL
-                          PROPERTIES IMPORTED_LOCATION "${OPENSSL_SSL_LIBRARY}"
-                                     INTERFACE_INCLUDE_DIRECTORIES
-                                     "${OPENSSL_INCLUDE_DIR}")
-
-    add_library(OpenSSL::Crypto UNKNOWN IMPORTED)
-    set_target_properties(OpenSSL::Crypto
-                          PROPERTIES IMPORTED_LOCATION "${OPENSSL_CRYPTO_LIBRARY}"
-                                     INTERFACE_INCLUDE_DIRECTORIES
-                                     "${OPENSSL_INCLUDE_DIR}")
-  endif()
   list(APPEND ARROW_SYSTEM_DEPENDENCIES "OpenSSL")
 
   include_directories(SYSTEM ${OPENSSL_INCLUDE_DIR})
@@ -1445,7 +1427,7 @@ if(ARROW_WITH_PROTOBUF)
   if(TARGET arrow::protobuf::libprotobuf)
     set(ARROW_PROTOBUF_LIBPROTOBUF arrow::protobuf::libprotobuf)
   else()
-    # Old CMake versions don't define the targets
+    # CMake 3.8 or older don't define the targets
     if(NOT TARGET protobuf::libprotobuf)
       add_library(protobuf::libprotobuf UNKNOWN IMPORTED)
       set_target_properties(protobuf::libprotobuf
@@ -1458,6 +1440,7 @@ if(ARROW_WITH_PROTOBUF)
   if(TARGET arrow::protobuf::libprotoc)
     set(ARROW_PROTOBUF_LIBPROTOC arrow::protobuf::libprotoc)
   else()
+    # CMake 3.8 or older don't define the targets
     if(NOT TARGET protobuf::libprotoc)
       if(PROTOBUF_PROTOC_LIBRARY AND NOT Protobuf_PROTOC_LIBRARY)
         # Old CMake versions have a different casing.
@@ -2279,10 +2262,9 @@ macro(build_cares)
     )
 
   set(CARES_CMAKE_ARGS
-      -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      "${EP_COMMON_CMAKE_ARGS}"
       -DCARES_STATIC=ON
       -DCARES_SHARED=OFF
-      "-DCMAKE_C_FLAGS=${EP_C_FLAGS}"
       -DCMAKE_INSTALL_LIBDIR=lib
       "-DCMAKE_INSTALL_PREFIX=${CARES_PREFIX}")
 
@@ -2341,10 +2323,9 @@ macro(build_grpc)
   # First need to build Abseil
   set(ABSL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/absl_ep-install")
   set(ABSL_CMAKE_ARGS
+      "${EP_COMMON_CMAKE_ARGS}"
       -DABSL_RUN_TESTS=OFF
-      -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DCMAKE_CXX_STANDARD=11
-      "-DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS}"
       -DCMAKE_INSTALL_LIBDIR=lib
       "-DCMAKE_INSTALL_PREFIX=${ABSL_PREFIX}")
   set(ABSL_BUILD_BYPRODUCTS)
@@ -2383,8 +2364,6 @@ macro(build_grpc)
   set(GRPC_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-install")
   set(GRPC_HOME "${GRPC_PREFIX}")
   set(GRPC_INCLUDE_DIR "${GRPC_PREFIX}/include")
-  set(GRPC_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${GRPC_PREFIX}"
-                      -DBUILD_SHARED_LIBS=OFF)
 
   set(
     GRPC_STATIC_LIBRARY_GPR
@@ -2457,7 +2436,7 @@ macro(build_grpc)
   string(REPLACE ";" "|" GRPC_PREFIX_PATH_ALT_SEP "${GRPC_CMAKE_PREFIX}")
 
   set(GRPC_CMAKE_ARGS
-      -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      "${EP_COMMON_CMAKE_ARGS}"
       -DCMAKE_PREFIX_PATH='${GRPC_PREFIX_PATH_ALT_SEP}'
       -DgRPC_BUILD_CSHARP_EXT=OFF
       -DgRPC_ABSL_PROVIDER=package
@@ -2467,7 +2446,6 @@ macro(build_grpc)
       -DgRPC_SSL_PROVIDER=package
       -DgRPC_ZLIB_PROVIDER=package
       -DCMAKE_CXX_FLAGS=${GRPC_CMAKE_CXX_FLAGS}
-      -DCMAKE_C_FLAGS=${EP_C_FLAGS}
       -DCMAKE_INSTALL_PREFIX=${GRPC_PREFIX}
       -DCMAKE_INSTALL_LIBDIR=lib
       -DBUILD_SHARED_LIBS=OFF)
@@ -2825,10 +2803,10 @@ macro(build_awssdk)
   list(APPEND ARROW_BUNDLED_STATIC_LIBS ${AWSSDK_LIBRARIES})
   set(AWSSDK_LINK_LIBRARIES ${AWSSDK_LIBRARIES})
   if(UNIX)
-    # on linux and macos curl seems to be required
+    # on Linux and macOS curl seems to be required
     find_package(CURL REQUIRED)
     if(NOT TARGET CURL::libcurl)
-      # For old FindCURL.cmake
+      # For CMake 3.11 or older
       add_library(CURL::libcurl UNKNOWN IMPORTED)
       set_target_properties(CURL::libcurl
                             PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
@@ -2855,7 +2833,7 @@ endmacro()
 if(ARROW_S3)
   # See https://aws.amazon.com/blogs/developer/developer-experience-of-the-aws-sdk-for-c-now-simplified-by-cmake/
 
-  # Workaround to force AWS cmake configuration to look for shared libraries
+  # Workaround to force AWS CMake configuration to look for shared libraries
   if(DEFINED ENV{CONDA_PREFIX})
     if(DEFINED BUILD_SHARED_LIBS)
       set(BUILD_SHARED_LIBS_WAS_SET TRUE)

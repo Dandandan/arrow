@@ -16,7 +16,8 @@
 // under the License.
 
 //! ExecutionContext contains methods for registering data sources and executing queries
-
+use crate::optimizer::hash_build_probe_order::HashBuildProbeOrder;
+use log::debug;
 use std::fs;
 use std::path::Path;
 use std::string::String;
@@ -27,6 +28,7 @@ use std::{
 };
 
 use futures::{StreamExt, TryStreamExt};
+use tokio::task::{self, JoinHandle};
 
 use arrow::csv;
 
@@ -53,6 +55,7 @@ use crate::sql::{
 use crate::variable::{VarProvider, VarType};
 use crate::{dataframe::DataFrame, physical_plan::udaf::AggregateUDF};
 use parquet::arrow::ArrowWriter;
+use parquet::file::properties::WriterProperties;
 
 /// ExecutionContext is the main interface for executing queries with DataFusion. The context
 /// provides the following functionality:
@@ -232,6 +235,7 @@ impl ExecutionContext {
             source: provider,
             projected_schema: schema.to_dfschema_ref()?,
             projection: None,
+            filters: vec![],
         };
         Ok(Arc::new(DataFrameImpl::new(
             self.state.clone(),
@@ -285,6 +289,7 @@ impl ExecutionContext {
                     source: Arc::clone(provider),
                     projected_schema: schema.to_dfschema_ref()?,
                     projection: None,
+                    filters: vec![],
                 };
                 Ok(Arc::new(DataFrameImpl::new(
                     self.state.clone(),
@@ -312,8 +317,11 @@ impl ExecutionContext {
     /// Optimize the logical plan by applying optimizer rules
     pub fn optimize(&self, plan: &LogicalPlan) -> Result<LogicalPlan> {
         // Apply standard rewrites and optimizations
+        debug!("Logical plan:\n {:?}", plan);
         let mut plan = ProjectionPushDown::new().optimize(&plan)?;
         plan = FilterPushDown::new().optimize(&plan)?;
+        plan = HashBuildProbeOrder::new().optimize(&plan)?;
+        debug!("Optimized logical plan:\n {:?}", plan);
 
         self.state
             .lock()
@@ -342,25 +350,34 @@ impl ExecutionContext {
         path: String,
     ) -> Result<()> {
         // create directory to contain the CSV files (one per partition)
-        let path = path.to_owned();
-        fs::create_dir(&path)?;
-
-        for i in 0..plan.output_partitioning().partition_count() {
-            let path = path.clone();
-            let plan = plan.clone();
-            let filename = format!("part-{}.csv", i);
-            let path = Path::new(&path).join(&filename);
-            let file = fs::File::create(path)?;
-            let mut writer = csv::Writer::new(file);
-            let stream = plan.execute(i).await?;
-
-            stream
-                .map(|batch| writer.write(&batch?))
-                .try_collect()
-                .await
-                .map_err(DataFusionError::from)?;
+        let fs_path = Path::new(&path);
+        match fs::create_dir(fs_path) {
+            Ok(()) => {
+                let mut tasks = vec![];
+                for i in 0..plan.output_partitioning().partition_count() {
+                    let plan = plan.clone();
+                    let filename = format!("part-{}.csv", i);
+                    let path = fs_path.join(&filename);
+                    let file = fs::File::create(path)?;
+                    let mut writer = csv::Writer::new(file);
+                    let stream = plan.execute(i).await?;
+                    let handle: JoinHandle<Result<()>> = task::spawn(async move {
+                        stream
+                            .map(|batch| writer.write(&batch?))
+                            .try_collect()
+                            .await
+                            .map_err(DataFusionError::from)
+                    });
+                    tasks.push(handle);
+                }
+                futures::future::join_all(tasks).await;
+                Ok(())
+            }
+            Err(e) => Err(DataFusionError::Execution(format!(
+                "Could not create directory {}: {:?}",
+                path, e
+            ))),
         }
-        Ok(())
     }
 
     /// Execute a query and write the results to a partitioned Parquet file
@@ -368,30 +385,42 @@ impl ExecutionContext {
         &self,
         plan: Arc<dyn ExecutionPlan>,
         path: String,
+        writer_properties: Option<WriterProperties>,
     ) -> Result<()> {
-        // create directory to contain the CSV files (one per partition)
-        let path = path.to_owned();
-        fs::create_dir(&path)?;
-
-        for i in 0..plan.output_partitioning().partition_count() {
-            let path = path.clone();
-            let plan = plan.clone();
-            let filename = format!("part-{}.parquet", i);
-            let path = Path::new(&path).join(&filename);
-            let file = fs::File::create(path)?;
-            let mut writer =
-                ArrowWriter::try_new(file.try_clone().unwrap(), plan.schema(), None)?;
-            let stream = plan.execute(i).await?;
-
-            stream
-                .map(|batch| writer.write(&batch?))
-                .try_collect()
-                .await
-                .map_err(DataFusionError::from)?;
-
-            writer.close()?;
+        // create directory to contain the Parquet files (one per partition)
+        let fs_path = Path::new(&path);
+        match fs::create_dir(fs_path) {
+            Ok(()) => {
+                let mut tasks = vec![];
+                for i in 0..plan.output_partitioning().partition_count() {
+                    let plan = plan.clone();
+                    let filename = format!("part-{}.parquet", i);
+                    let path = fs_path.join(&filename);
+                    let file = fs::File::create(path)?;
+                    let mut writer = ArrowWriter::try_new(
+                        file.try_clone().unwrap(),
+                        plan.schema(),
+                        writer_properties.clone(),
+                    )?;
+                    let stream = plan.execute(i).await?;
+                    let handle: JoinHandle<Result<()>> = task::spawn(async move {
+                        stream
+                            .map(|batch| writer.write(&batch?))
+                            .try_collect()
+                            .await
+                            .map_err(DataFusionError::from)?;
+                        writer.close().map_err(DataFusionError::from)
+                    });
+                    tasks.push(handle);
+                }
+                futures::future::join_all(tasks).await;
+                Ok(())
+            }
+            Err(e) => Err(DataFusionError::Execution(format!(
+                "Could not create directory {}: {:?}",
+                path, e
+            ))),
         }
-        Ok(())
     }
 }
 
@@ -1220,7 +1249,7 @@ mod tests {
 
         // execute a simple query and write the results to CSV
         let out_dir = tmp_dir.as_ref().to_str().unwrap().to_string() + "/out";
-        write_parquet(&mut ctx, "SELECT c1, c2 FROM test", &out_dir).await?;
+        write_parquet(&mut ctx, "SELECT c1, c2 FROM test", &out_dir, None).await?;
 
         // create a new context and verify that the results were saved to a partitioned csv file
         let mut ctx = ExecutionContext::new();
@@ -1565,11 +1594,13 @@ mod tests {
         ctx: &mut ExecutionContext,
         sql: &str,
         out_dir: &str,
+        writer_properties: Option<WriterProperties>,
     ) -> Result<()> {
         let logical_plan = ctx.create_logical_plan(sql)?;
         let logical_plan = ctx.optimize(&logical_plan)?;
         let physical_plan = ctx.create_physical_plan(&logical_plan)?;
-        ctx.write_parquet(physical_plan, out_dir.to_string()).await
+        ctx.write_parquet(physical_plan, out_dir.to_string(), writer_properties)
+            .await
     }
 
     /// Generate CSV partitions within the supplied directory
