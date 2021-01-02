@@ -192,13 +192,11 @@ impl<'a> Iterator for SlicesIterator<'a> {
 pub fn build_filter(filter: &BooleanArray) -> Result<Filter> {
     let iter = SlicesIterator::new(filter);
     let filter_count = iter.filter_count;
-    let chunks = iter.collect::<Vec<_>>();
 
     Ok(Box::new(move |array: &ArrayData| {
         let mut mutable = MutableArrayData::new(vec![array], false, filter_count);
-        chunks
-            .iter()
-            .for_each(|(start, end)| mutable.extend(0, *start, *end));
+        SlicesIterator::new(filter)
+            .for_each(|(start, end)| mutable.extend(0, start, end));
         mutable.freeze()
     }))
 }
