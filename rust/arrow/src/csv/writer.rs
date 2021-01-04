@@ -124,17 +124,16 @@ impl<W: Write> Writer<W> {
 
     /// Convert a record to a string vector
     fn convert(
-        &self,
+        &mut self,
         batch: &RecordBatch,
         row_index: usize,
-        buffer: &mut [String],
+        num_cols: usize,
     ) -> Result<()> {
-        // TODO: it'd be more efficient if we could create `record: Vec<&[u8]>
-        for (col_index, item) in buffer.iter_mut().enumerate() {
+        for col_index in 0..num_cols {
             let col = batch.column(col_index);
             if col.is_null(row_index) {
                 // write an empty value
-                *item = "".to_string();
+                self.writer.write_field("")?;
                 continue;
             }
             let string = match col.data_type() {
@@ -246,7 +245,7 @@ impl<W: Write> Writer<W> {
                     )));
                 }
             };
-            *item = string;
+            self.writer.write_field(string)?;
         }
         Ok(())
     }
@@ -267,11 +266,8 @@ impl<W: Write> Writer<W> {
             self.beginning = false;
         }
 
-        let mut buffer = vec!["".to_string(); batch.num_columns()];
-
         for row_index in 0..batch.num_rows() {
-            self.convert(batch, row_index, &mut buffer)?;
-            self.writer.write_record(&buffer)?;
+            self.convert(batch, row_index, num_columns)?;
         }
         self.writer.flush()?;
 
