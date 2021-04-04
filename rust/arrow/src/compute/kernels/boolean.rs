@@ -35,6 +35,7 @@ use crate::util::bit_util::{ceil, round_upto_multiple_of_64};
 use core::iter;
 use lexical_core::Integer;
 use std::iter::FromIterator;
+use smallvec::{SmallVec, smallvec};
 
 fn binary_boolean_kleene_kernel<F>(
     left: &BooleanArray,
@@ -148,7 +149,7 @@ where
         None,
         Some(bool_valid_buffer),
         left_offset,
-        vec![bool_buffer],
+        smallvec![bool_buffer],
         vec![],
     );
 
@@ -189,7 +190,7 @@ where
         None,
         null_bit_buffer,
         0,
-        vec![values],
+        smallvec![values],
         vec![],
     );
     Ok(BooleanArray::from(data))
@@ -369,7 +370,7 @@ pub fn not(left: &BooleanArray) -> Result<BooleanArray> {
         None,
         null_bit_buffer,
         0,
-        vec![values],
+        smallvec![values],
         vec![],
     );
     Ok(BooleanArray::from(data))
@@ -402,7 +403,7 @@ pub fn is_null(input: &Array) -> Result<BooleanArray> {
     };
 
     let data =
-        ArrayData::new(DataType::Boolean, len, None, None, 0, vec![output], vec![]);
+        ArrayData::new(DataType::Boolean, len, None, None, 0, smallvec![output], vec![]);
 
     Ok(BooleanArray::from(data))
 }
@@ -436,7 +437,7 @@ pub fn is_not_null(input: &Array) -> Result<BooleanArray> {
     };
 
     let data =
-        ArrayData::new(DataType::Boolean, len, None, None, 0, vec![output], vec![]);
+        ArrayData::new(DataType::Boolean, len, None, None, 0, smallvec![output], vec![]);
 
     Ok(BooleanArray::from(data))
 }
@@ -508,14 +509,14 @@ where
     // Align/shift left data on offset as needed, since new bitmaps are shifted and aligned to 0 already
     // NOTE: this probably only works for primitive arrays.
     let data_buffers = if left.offset() == 0 {
-        left_data.buffers().to_vec()
+        left_data.buffers().into()
     } else {
         // Shift each data buffer by type's bit_width * offset.
         left_data
             .buffers()
             .iter()
             .map(|buf| buf.slice(left.offset() * T::get_byte_width()))
-            .collect::<Vec<_>>()
+            .collect::<SmallVec<_>>()
     };
 
     // Construct new array with same values but modified null bitmap

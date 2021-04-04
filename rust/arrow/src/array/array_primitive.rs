@@ -33,6 +33,7 @@ use crate::{
     buffer::{Buffer, MutableBuffer},
     util::trusted_len_unzip,
 };
+use smallvec::smallvec;
 
 /// Number of seconds in a day
 const SECONDS_IN_DAY: i64 = 86_400;
@@ -107,7 +108,7 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             None,
             None,
             0,
-            vec![val_buf],
+            smallvec![val_buf],
             vec![],
         );
         PrimitiveArray::from(data)
@@ -123,7 +124,7 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             None,
             None,
             0,
-            vec![val_buf],
+            smallvec![val_buf],
             vec![],
         );
         PrimitiveArray::from(data)
@@ -306,7 +307,7 @@ impl<T: ArrowPrimitiveType, Ptr: Borrow<Option<<T as ArrowPrimitiveType>::Native
             None,
             Some(null_buf.into()),
             0,
-            vec![buffer],
+            smallvec![buffer],
             vec![],
         );
         PrimitiveArray::from(data)
@@ -331,7 +332,7 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
         let (null, buffer) = trusted_len_unzip(iterator);
 
         let data =
-            ArrayData::new(T::DATA_TYPE, len, None, Some(null), 0, vec![buffer], vec![]);
+            ArrayData::new(T::DATA_TYPE, len, None, Some(null), 0, smallvec![buffer], vec![]);
         PrimitiveArray::from(data)
     }
 }

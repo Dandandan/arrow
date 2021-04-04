@@ -47,6 +47,7 @@ use crate::error::{ArrowError, Result};
 use crate::{array::*, compute::take};
 use crate::{buffer::Buffer, util::serialization::lexical_to_string};
 use num::{NumCast, ToPrimitive};
+use smallvec::smallvec;
 
 /// Return true if a value of type `from_type` can be cast into a
 /// value of `to_type`. Note that such as cast may be lossy.
@@ -857,7 +858,7 @@ where
         Some(array.null_count()),
         array.data().null_bitmap().clone().map(|bitmap| bitmap.bits),
         array.data().offset(),
-        array.data().buffers().to_vec(),
+        array.data().buffers().into(),
         vec![],
     );
     Ok(Arc::new(PrimitiveArray::<TO>::from(data)) as ArrayRef)
@@ -1166,7 +1167,7 @@ fn dictionary_cast<K: ArrowDictionaryKeyType>(
                     .clone()
                     .map(|bitmap| bitmap.bits),
                 cast_keys.data().offset(),
-                cast_keys.data().buffers().to_vec(),
+                cast_keys.data().buffers().into(),
                 vec![cast_values.data().clone()],
             );
 
@@ -1339,7 +1340,7 @@ fn cast_primitive_to_list<OffsetSize: OffsetSizeTrait + NumCast>(
             .clone()
             .map(|bitmap| bitmap.bits),
         0,
-        vec![offsets.into()],
+        smallvec![offsets.into()],
         vec![cast_array.data().clone()],
     );
     let list_array =
@@ -1368,7 +1369,7 @@ fn cast_list_inner<OffsetSize: OffsetSizeTrait>(
             .map(|bitmap| bitmap.bits),
         array.offset(),
         // reuse offset buffer
-        data.buffers().to_vec(),
+        data.buffers().into(),
         vec![cast_array.data().clone()],
     );
     let list = GenericListArray::<OffsetSize>::from(array_data);

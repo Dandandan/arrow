@@ -31,6 +31,8 @@ use crate::compute::util::combine_option_bitmap;
 use crate::datatypes::{ArrowNumericType, DataType};
 use crate::error::{ArrowError, Result};
 use crate::util::bit_util;
+use smallvec::smallvec;
+
 
 /// Helper function to perform boolean lambda function on values from two arrays, this
 /// version does not attempt to use SIMD.
@@ -56,7 +58,7 @@ macro_rules! compare_op {
             None,
             null_bit_buffer,
             0,
-            vec![Buffer::from(buffer)],
+            smallvec![Buffer::from(buffer)],
             vec![],
         );
         Ok(BooleanArray::from(data))
@@ -111,7 +113,7 @@ macro_rules! compare_op_primitive {
             None,
             null_bit_buffer,
             0,
-            vec![Buffer::from(values)],
+            smallvec![Buffer::from(values)],
             vec![],
         );
         Ok(BooleanArray::from(data))
@@ -132,7 +134,7 @@ macro_rules! compare_op_scalar {
             None,
             null_bit_buffer,
             0,
-            vec![Buffer::from(buffer)],
+            smallvec![Buffer::from(buffer)],
             vec![],
         );
         Ok(BooleanArray::from(data))
@@ -169,7 +171,7 @@ macro_rules! compare_op_scalar_primitive {
             None,
             null_bit_buffer,
             0,
-            vec![Buffer::from(values)],
+            smallvec![Buffer::from(values)],
             vec![],
         );
         Ok(BooleanArray::from(data))
@@ -264,7 +266,7 @@ pub fn like_utf8<OffsetSize: StringOffsetSizeTrait>(
         None,
         null_bit_buffer,
         0,
-        vec![result.finish()],
+        smallvec![result.finish()],
         vec![],
     );
     Ok(BooleanArray::from(data))
@@ -334,7 +336,7 @@ pub fn like_utf8_scalar<OffsetSize: StringOffsetSizeTrait>(
         None,
         null_bit_buffer,
         0,
-        vec![bool_buf.into()],
+        smallvec![bool_buf.into()],
         vec![],
     );
     Ok(BooleanArray::from(data))
@@ -386,7 +388,7 @@ pub fn nlike_utf8<OffsetSize: StringOffsetSizeTrait>(
         None,
         null_bit_buffer,
         0,
-        vec![result.finish()],
+        smallvec![result.finish()],
         vec![],
     );
     Ok(BooleanArray::from(data))
@@ -439,7 +441,7 @@ pub fn nlike_utf8_scalar<OffsetSize: StringOffsetSizeTrait>(
         None,
         null_bit_buffer,
         0,
-        vec![result.finish()],
+        smallvec![result.finish()],
         vec![],
     );
     Ok(BooleanArray::from(data))
@@ -910,7 +912,7 @@ where
         None,
         None,
         0,
-        vec![bool_buf.into()],
+        smallvec![bool_buf.into()],
         vec![],
     );
     Ok(BooleanArray::from(data))
@@ -968,7 +970,7 @@ where
         None,
         None,
         0,
-        vec![bool_buf.into()],
+        smallvec![bool_buf.into()],
         vec![],
     );
     Ok(BooleanArray::from(data))

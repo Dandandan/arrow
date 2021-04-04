@@ -36,6 +36,7 @@ use crate::datatypes;
 use crate::datatypes::ArrowNumericType;
 use crate::error::{ArrowError, Result};
 use crate::{array::*, util::bit_util};
+use smallvec::smallvec;
 use num::traits::Pow;
 #[cfg(simd)]
 use std::borrow::BorrowMut;
@@ -183,7 +184,7 @@ where
         None,
         null_bit_buffer,
         0,
-        vec![buffer],
+        smallvec![buffer],
         vec![],
     );
     Ok(PrimitiveArray::<T>::from(data))
@@ -251,7 +252,7 @@ where
         None,
         null_bit_buffer,
         0,
-        vec![buffer],
+        smallvec![buffer],
         vec![],
     );
     Ok(PrimitiveArray::<T>::from(data))
@@ -279,7 +280,7 @@ where
         None,
         array.data_ref().null_buffer().cloned(),
         0,
-        vec![buffer],
+        smallvec![buffer],
         vec![],
     );
     Ok(PrimitiveArray::<T>::from(data))

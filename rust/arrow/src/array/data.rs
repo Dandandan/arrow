@@ -21,6 +21,8 @@
 use std::mem;
 use std::sync::Arc;
 
+use smallvec::{smallvec, SmallVec};
+
 use crate::datatypes::{DataType, IntervalUnit};
 use crate::{bitmap::Bitmap, datatypes::ArrowNativeType};
 use crate::{
@@ -194,14 +196,14 @@ pub(crate) fn into_buffers(
     data_type: &DataType,
     buffer1: MutableBuffer,
     buffer2: MutableBuffer,
-) -> Vec<Buffer> {
+) -> SmallVec<[Buffer; 2]> {
     match data_type {
-        DataType::Null | DataType::Struct(_) => vec![],
+        DataType::Null | DataType::Struct(_) => smallvec![],
         DataType::Utf8
         | DataType::Binary
         | DataType::LargeUtf8
-        | DataType::LargeBinary => vec![buffer1.into(), buffer2.into()],
-        _ => vec![buffer1.into()],
+        | DataType::LargeBinary => smallvec![buffer1.into(), buffer2.into()],
+        _ => smallvec![buffer1.into()],
     }
 }
 
@@ -225,7 +227,7 @@ pub struct ArrayData {
     /// The buffers for this array data. Note that depending on the array types, this
     /// could hold different kinds of buffers (e.g., value buffer, value offset buffer)
     /// at different positions.
-    buffers: Vec<Buffer>,
+    buffers: SmallVec<[Buffer; 2]>,
 
     /// The child(ren) of this array. Only non-empty for nested types, currently
     /// `ListArray` and `StructArray`.
@@ -245,7 +247,7 @@ impl ArrayData {
         null_count: Option<usize>,
         null_bit_buffer: Option<Buffer>,
         offset: usize,
-        buffers: Vec<Buffer>,
+        buffers: SmallVec<[Buffer; 2]>,
         child_data: Vec<ArrayData>,
     ) -> Self {
         let null_count = match null_count {
@@ -481,7 +483,7 @@ pub struct ArrayDataBuilder {
     null_count: Option<usize>,
     null_bit_buffer: Option<Buffer>,
     offset: usize,
-    buffers: Vec<Buffer>,
+    buffers: SmallVec<[Buffer; 2]>,
     child_data: Vec<ArrayData>,
 }
 
@@ -494,7 +496,7 @@ impl ArrayDataBuilder {
             null_count: None,
             null_bit_buffer: None,
             offset: 0,
-            buffers: vec![],
+            buffers: smallvec![],
             child_data: vec![],
         }
     }
@@ -516,7 +518,7 @@ impl ArrayDataBuilder {
         self
     }
 
-    pub fn buffers(mut self, v: Vec<Buffer>) -> Self {
+    pub fn buffers(mut self, v: SmallVec<[Buffer; 2]>) -> Self {
         self.buffers = v;
         self
     }
@@ -559,7 +561,7 @@ mod tests {
     #[test]
     fn test_new() {
         let arr_data =
-            ArrayData::new(DataType::Boolean, 10, Some(1), None, 2, vec![], vec![]);
+            ArrayData::new(DataType::Boolean, 10, Some(1), None, 2, smallvec![], vec![]);
         assert_eq!(10, arr_data.len());
         assert_eq!(1, arr_data.null_count());
         assert_eq!(2, arr_data.offset());
@@ -575,7 +577,7 @@ mod tests {
             Some(0),
             None,
             0,
-            vec![Buffer::from_slice_ref(&[1i32, 2, 3, 4, 5])],
+            smallvec![Buffer::from_slice_ref(&[1i32, 2, 3, 4, 5])],
             vec![],
         );
         let v = vec![0, 1, 2, 3];

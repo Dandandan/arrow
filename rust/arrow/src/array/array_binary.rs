@@ -19,7 +19,7 @@ use std::convert::{From, TryInto};
 use std::fmt;
 use std::mem;
 use std::{any::Any, iter::FromIterator};
-
+use smallvec::smallvec;
 use super::{
     array::print_long_array, raw_pointer::RawPtrBox, Array, ArrayData,
     FixedSizeListArray, GenericBinaryIter, GenericListArray, OffsetSizeTrait,
@@ -441,7 +441,7 @@ impl FixedSizeBinaryArray {
             None,
             Some(null_buf.into()),
             0,
-            vec![buffer.into()],
+            smallvec![buffer.into()],
             vec![],
         );
         Ok(FixedSizeBinaryArray::from(array_data))

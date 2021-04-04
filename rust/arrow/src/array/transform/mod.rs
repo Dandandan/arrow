@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::{buffer::MutableBuffer, datatypes::DataType, util::bit_util};
-
 use super::{
     data::{into_buffers, new_buffers},
     ArrayData,
 };
+use crate::{buffer::MutableBuffer, datatypes::DataType, util::bit_util};
+use smallvec::smallvec;
 
 mod boolean;
 mod fixed_binary;

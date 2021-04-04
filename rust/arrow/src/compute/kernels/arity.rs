@@ -20,6 +20,7 @@
 use crate::array::{Array, ArrayData, PrimitiveArray};
 use crate::buffer::Buffer;
 use crate::datatypes::ArrowPrimitiveType;
+use smallvec::smallvec;
 
 #[inline]
 fn into_primitive_array_data<I: ArrowPrimitiveType, O: ArrowPrimitiveType>(
@@ -32,7 +33,7 @@ fn into_primitive_array_data<I: ArrowPrimitiveType, O: ArrowPrimitiveType>(
         None,
         array.data_ref().null_buffer().cloned(),
         0,
-        vec![buffer],
+        smallvec![buffer],
         vec![],
     )
 }

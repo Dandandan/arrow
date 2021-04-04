@@ -87,6 +87,8 @@ use std::{
     sync::Arc,
 };
 
+use smallvec::SmallVec;
+
 use crate::array::ArrayData;
 use crate::buffer::Buffer;
 use crate::datatypes::{DataType, Field, TimeUnit};
@@ -689,7 +691,7 @@ impl ArrowArray {
     }
 
     /// returns all buffers, as organized by Rust (i.e. null buffer is skipped)
-    pub fn buffers(&self) -> Result<Vec<Buffer>> {
+    pub fn buffers(&self) -> Result<SmallVec<[Buffer; 2]>> {
         (0..self.array.n_buffers - 1)
             .map(|index| {
                 // + 1: skip null buffer

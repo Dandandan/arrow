@@ -18,6 +18,7 @@
 //! Contains functionality to load an ArrayData from the C Data Interface
 
 use std::convert::TryFrom;
+use smallvec::smallvec;
 
 use crate::{
     error::{ArrowError, Result},
@@ -54,7 +55,7 @@ impl TryFrom<ffi::ArrowArray> for ArrayData {
             Some(null_count),
             null_bit_buffer,
             offset,
-            buffers,
+            buffers.into(),
             child_data,
         ))
     }

@@ -29,6 +29,8 @@ use crate::{
     datatypes::*,
 };
 
+use smallvec::smallvec;
+
 use super::{bench_util::*, bit_util, test_util::seedable_rng};
 
 /// Create a random [RecordBatch] from a schema
@@ -198,7 +200,7 @@ fn create_random_list_array(
         None,
         null_buffer,
         0,
-        vec![offsets],
+        smallvec![offsets],
         vec![child_data.clone()],
     );
     Ok(make_array(list_data))

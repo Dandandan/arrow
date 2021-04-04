@@ -20,7 +20,7 @@ use std::convert::From;
 use std::iter::{FromIterator, IntoIterator};
 use std::mem;
 use std::{any::Any, fmt};
-
+use smallvec::smallvec;
 use super::*;
 use super::{array::print_long_array, raw_pointer::RawPtrBox};
 use crate::buffer::{Buffer, MutableBuffer};
@@ -180,7 +180,7 @@ impl<Ptr: Borrow<Option<bool>>> FromIterator<Ptr> for BooleanArray {
             None,
             Some(null_buf.into()),
             0,
-            vec![val_buf.into()],
+            smallvec![val_buf.into()],
             vec![],
         );
         BooleanArray::from(data)

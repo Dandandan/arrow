@@ -18,7 +18,7 @@
 use std::fmt;
 use std::sync::Arc;
 use std::{any::Any, convert::TryFrom};
-
+use smallvec::smallvec;
 use super::*;
 use crate::array::equal_json::JsonEqual;
 use crate::buffer::{Buffer, MutableBuffer};
@@ -341,7 +341,7 @@ pub fn new_null_array(data_type: &DataType, length: usize) -> ArrayRef {
                 Some(length),
                 Some(null_buf.clone()),
                 0,
-                vec![null_buf],
+                smallvec![null_buf],
                 vec![],
             ))
         }
@@ -378,7 +378,7 @@ pub fn new_null_array(data_type: &DataType, length: usize) -> ArrayRef {
             Some(length),
             Some(MutableBuffer::new_null(length).into()),
             0,
-            vec![Buffer::from(vec![0u8; *value_len as usize * length])],
+            smallvec![Buffer::from(vec![0u8; *value_len as usize * length])],
             vec![],
         )),
         DataType::Binary | DataType::Utf8 => {
@@ -399,7 +399,7 @@ pub fn new_null_array(data_type: &DataType, length: usize) -> ArrayRef {
             Some(length),
             Some(MutableBuffer::new_null(length).into()),
             0,
-            vec![],
+            smallvec![],
             vec![
                 new_null_array(field.data_type(), *value_len as usize * length)
                     .data()
@@ -412,7 +412,7 @@ pub fn new_null_array(data_type: &DataType, length: usize) -> ArrayRef {
             Some(length),
             Some(MutableBuffer::new_null(length).into()),
             0,
-            vec![],
+            smallvec![],
             fields
                 .iter()
                 .map(|field| ArrayData::new_empty(field.data_type()))
@@ -428,7 +428,7 @@ pub fn new_null_array(data_type: &DataType, length: usize) -> ArrayRef {
                 Some(length),
                 Some(MutableBuffer::new_null(length).into()),
                 0,
-                vec![MutableBuffer::new(0).into()], // values are empty
+                smallvec![MutableBuffer::new(0).into()], // values are empty
                 vec![new_empty_array(value.as_ref()).data().clone()],
             ))
         }
@@ -450,7 +450,7 @@ fn new_null_list_array<OffsetSize: OffsetSizeTrait>(
         Some(length),
         Some(MutableBuffer::new_null(length).into()),
         0,
-        vec![Buffer::from(
+        smallvec![Buffer::from(
             vec![OffsetSize::zero(); length + 1].to_byte_slice(),
         )],
         vec![ArrayData::new_empty(child_data_type)],
@@ -468,7 +468,7 @@ fn new_null_binary_array<OffsetSize: OffsetSizeTrait>(
         Some(length),
         Some(MutableBuffer::new_null(length).into()),
         0,
-        vec![
+        smallvec![
             Buffer::from(vec![OffsetSize::zero(); length + 1].to_byte_slice()),
             MutableBuffer::new(0).into(),
         ],
@@ -487,7 +487,7 @@ fn new_null_sized_array<T: ArrowPrimitiveType>(
         Some(length),
         Some(MutableBuffer::new_null(length).into()),
         0,
-        vec![Buffer::from(vec![0u8; length * T::get_byte_width()])],
+        smallvec![Buffer::from(vec![0u8; length * T::get_byte_width()])],
         vec![],
     ))
 }

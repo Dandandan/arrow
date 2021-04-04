@@ -84,7 +84,7 @@ impl<'a, K: ArrowPrimitiveType> DictionaryArray<K> {
             Some(data.null_count()),
             data.null_buffer().cloned(),
             data.offset(),
-            data.buffers().to_vec(),
+            data.buffers().into(),
             vec![],
         );
         PrimitiveArray::<K>::from(keys_data)
@@ -152,7 +152,7 @@ impl<T: ArrowPrimitiveType> From<ArrayData> for DictionaryArray<T> {
                 Some(data.null_count()),
                 data.null_buffer().cloned(),
                 data.offset(),
-                data.buffers().to_vec(),
+                data.buffers().into(),
                 vec![],
             ));
             let values = make_array(data.child_data()[0].clone());

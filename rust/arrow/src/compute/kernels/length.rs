@@ -27,6 +27,8 @@ use crate::{
     error::{ArrowError, Result},
 };
 
+use smallvec::smallvec;
+
 fn unary_offsets_string<O, F>(
     array: &GenericStringArray<O>,
     data_type: DataType,
@@ -63,7 +65,7 @@ where
         None,
         null_bit_buffer,
         0,
-        vec![buffer],
+        smallvec![buffer],
         vec![],
     );
     make_array(data)
@@ -246,7 +248,7 @@ mod tests {
             ArrayData::builder(DataType::Utf8)
                 .len(2)
                 .offset(1)
-                .buffers(a.data_ref().buffers().to_vec())
+                .buffers(a.data_ref().buffers().into())
                 .build(),
         );
         let result = length(b.as_ref())?;
@@ -372,7 +374,7 @@ mod tests {
             ArrayData::builder(DataType::Utf8)
                 .len(2)
                 .offset(1)
-                .buffers(a.data_ref().buffers().to_vec())
+                .buffers(a.data_ref().buffers().into())
                 .build(),
         );
         let result = bit_length(b.as_ref())?;
