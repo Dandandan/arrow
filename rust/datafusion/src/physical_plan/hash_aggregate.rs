@@ -75,6 +75,8 @@ pub enum AggregateMode {
     Partial,
     /// Final aggregate that produces a single partition of output
     Final,
+    /// Partitioned aggregate that is applied in parallel on hash-partioned partitions
+    Partitioned,
 }
 
 /// Hash aggregate execution plan
@@ -118,8 +120,8 @@ fn create_schema(
                 fields.extend(expr.state_fields()?.iter().cloned())
             }
         }
-        AggregateMode::Final => {
-            // in final mode, the field with the final result of the accumulator
+        AggregateMode::Partitioned | AggregateMode::Final => {
+            // in final and paritioned mode, the field with the final result of the accumulator
             for expr in aggr_expr {
                 fields.push(expr.field()?)
             }
@@ -195,7 +197,9 @@ impl ExecutionPlan for HashAggregateExec {
 
     fn required_child_distribution(&self) -> Distribution {
         match &self.mode {
-            AggregateMode::Partial => Distribution::UnspecifiedDistribution,
+            AggregateMode::Partial | AggregateMode::Partitioned => {
+                Distribution::UnspecifiedDistribution
+            }
             AggregateMode::Final => Distribution::SinglePartition,
         }
     }
@@ -404,7 +408,9 @@ fn group_aggregate_batch(
                     )
                 })
                 .try_for_each(|(accumulator, values)| match mode {
-                    AggregateMode::Partial => accumulator.update_batch(&values),
+                    AggregateMode::Partial | AggregateMode::Partitioned => {
+                        accumulator.update_batch(&values)
+                    }
                     AggregateMode::Final => {
                         // note: the aggregation here is over states, not values, thus the merge
                         accumulator.merge_batch(&values)
@@ -603,7 +609,7 @@ async fn compute_grouped_hash_aggregate(
     //let mut accumulators: Accumulators = FnvHashMap::default();
 
     // iterate over all input batches and update the accumulators
-    let mut accumulators = Accumulators::default();
+    let mut accumulators = Accumulators::with_hasher(RandomState::with_seeds(0, 0, 0, 0));
     while let Some(batch) = input.next().await {
         let batch = batch?;
         accumulators = group_aggregate_batch(
@@ -737,7 +743,7 @@ fn aggregate_expressions(
     mode: &AggregateMode,
 ) -> Result<Vec<Vec<Arc<dyn PhysicalExpr>>>> {
     match mode {
-        AggregateMode::Partial => {
+        AggregateMode::Partial | AggregateMode::Partitioned => {
             Ok(aggr_expr.iter().map(|agg| agg.expressions()).collect())
         }
         // in this mode, we build the merge expressions of the aggregation
@@ -834,7 +840,9 @@ fn aggregate_batch(
 
             // 1.3
             match mode {
-                AggregateMode::Partial => accum.update_batch(values),
+                AggregateMode::Partial | AggregateMode::Partitioned => {
+                    accum.update_batch(values)
+                }
                 AggregateMode::Final => accum.merge_batch(values),
             }
         })
@@ -992,7 +1000,7 @@ fn finalize_aggregation(
     mode: &AggregateMode,
 ) -> Result<Vec<ArrayRef>> {
     match mode {
-        AggregateMode::Partial => {
+        AggregateMode::Partial | &AggregateMode::Partitioned => {
             // build the vector of states
             let a = accumulators
                 .iter()
