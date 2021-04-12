@@ -44,14 +44,21 @@ pub struct CoalesceBatchesExec {
     input: Arc<dyn ExecutionPlan>,
     /// Minimum number of rows for coalesces batches
     target_batch_size: usize,
+    /// `CoalesceBatchesExec` will skip coalesces batches whenever a batch exceeds this size
+    skip_coalesce_size: usize,
 }
 
 impl CoalesceBatchesExec {
     /// Create a new CoalesceBatchesExec
-    pub fn new(input: Arc<dyn ExecutionPlan>, target_batch_size: usize) -> Self {
+    pub fn new(
+        input: Arc<dyn ExecutionPlan>,
+        target_batch_size: usize,
+        skip_coalesce_size: usize,
+    ) -> Self {
         Self {
             input,
             target_batch_size,
+            skip_coalesce_size,
         }
     }
 
@@ -97,6 +104,7 @@ impl ExecutionPlan for CoalesceBatchesExec {
             1 => Ok(Arc::new(CoalesceBatchesExec::new(
                 children[0].clone(),
                 self.target_batch_size,
+                self.skip_coalesce_size,
             ))),
             _ => Err(DataFusionError::Internal(
                 "CoalesceBatchesExec wrong number of children".to_string(),
@@ -109,6 +117,7 @@ impl ExecutionPlan for CoalesceBatchesExec {
             input: self.input.execute(partition).await?,
             schema: self.input.schema(),
             target_batch_size: self.target_batch_size,
+            skip_coalesce_size: self.skip_coalesce_size,
             buffer: Vec::new(),
             buffered_rows: 0,
             is_closed: false,
@@ -123,6 +132,8 @@ struct CoalesceBatchesStream {
     schema: SchemaRef,
     /// Minimum number of rows for coalesces batches
     target_batch_size: usize,
+    /// Will skip coalescing batches whenever a batch exceeds this size
+    skip_coalesce_size: usize,
     /// Buffered batches
     buffer: Vec<RecordBatch>,
     /// Buffered row count
@@ -134,10 +145,7 @@ struct CoalesceBatchesStream {
 impl Stream for CoalesceBatchesStream {
     type Item = ArrowResult<RecordBatch>;
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.is_closed {
             return Poll::Ready(None);
         }
@@ -146,7 +154,8 @@ impl Stream for CoalesceBatchesStream {
             match input_batch {
                 Poll::Ready(x) => match x {
                     Some(Ok(ref batch)) => {
-                        if batch.num_rows() >= self.target_batch_size
+                        if (batch.num_rows() >= self.target_batch_size
+                            || batch.num_rows() >= self.skip_coalesce_size)
                             && self.buffer.is_empty()
                         {
                             return Poll::Ready(Some(Ok(batch.clone())));
@@ -159,11 +168,8 @@ impl Stream for CoalesceBatchesStream {
                             // check to see if we have enough batches yet
                             if self.buffered_rows >= self.target_batch_size {
                                 // combine the batches and return
-                                let batch = concat_batches(
-                                    &self.schema,
-                                    &self.buffer,
-                                    self.buffered_rows,
-                                )?;
+                                let batch =
+                                    concat_batches(&self.schema, &self.buffer, self.buffered_rows)?;
                                 // reset buffer state
                                 self.buffer.clear();
                                 self.buffered_rows = 0;
@@ -180,11 +186,8 @@ impl Stream for CoalesceBatchesStream {
                             return Poll::Ready(None);
                         } else {
                             // combine the batches and return
-                            let batch = concat_batches(
-                                &self.schema,
-                                &self.buffer,
-                                self.buffered_rows,
-                            )?;
+                            let batch =
+                                concat_batches(&self.schema, &self.buffer, self.buffered_rows)?;
                             // reset buffer state
                             self.buffer.clear();
                             self.buffered_rows = 0;
@@ -251,7 +254,7 @@ mod tests {
         let partition = create_vec_batches(&schema, 10);
         let partitions = vec![partition];
 
-        let output_partitions = coalesce_batches(&schema, partitions, 21).await?;
+        let output_partitions = coalesce_batches(&schema, partitions, 21, 15).await?;
         assert_eq!(1, output_partitions.len());
 
         // input is 10 batches x 8 rows (80 rows)
@@ -291,13 +294,16 @@ mod tests {
         schema: &SchemaRef,
         input_partitions: Vec<Vec<RecordBatch>>,
         target_batch_size: usize,
+        max_batch_size: usize,
     ) -> Result<Vec<Vec<RecordBatch>>> {
         // create physical plan
         let exec = MemoryExec::try_new(&input_partitions, schema.clone(), None)?;
-        let exec =
-            RepartitionExec::try_new(Arc::new(exec), Partitioning::RoundRobinBatch(1))?;
-        let exec: Arc<dyn ExecutionPlan> =
-            Arc::new(CoalesceBatchesExec::new(Arc::new(exec), target_batch_size));
+        let exec = RepartitionExec::try_new(Arc::new(exec), Partitioning::RoundRobinBatch(1))?;
+        let exec: Arc<dyn ExecutionPlan> = Arc::new(CoalesceBatchesExec::new(
+            Arc::new(exec),
+            target_batch_size,
+            max_batch_size,
+        ));
 
         // execute and collect results
         let output_partition_count = exec.output_partitioning().partition_count();

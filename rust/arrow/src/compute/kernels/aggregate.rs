@@ -191,7 +191,7 @@ pub fn max_boolean(array: &BooleanArray) -> Option<bool> {
 ///
 /// Returns `None` if the array is empty or only contains null values.
 #[cfg(not(simd))]
-pub fn sum<T>(array: &PrimitiveArray<T>) -> Option<T::Native>
+fn sum_inner<T>(array: &PrimitiveArray<T>) -> Option<T::Native>
 where
     T: ArrowNumericType,
     T::Native: Add<Output = T::Native>,
@@ -241,6 +241,38 @@ where
 
             Some(sum)
         }
+    }
+}
+
+#[target_feature(enable = "avx")]
+unsafe fn sum_avx<T>(array: &PrimitiveArray<T>) -> Option<T::Native>
+where
+    T: ArrowNumericType,
+    T::Native: Add<Output = T::Native>,
+{
+    sum_inner(array)
+}
+
+#[target_feature(enable = "avx2")]
+unsafe fn sum_avx2<T>(array: &PrimitiveArray<T>) -> Option<T::Native>
+where
+    T: ArrowNumericType,
+    T::Native: Add<Output = T::Native>,
+{
+    sum_inner(array)
+}
+
+pub fn sum<T>(array: &PrimitiveArray<T>) -> Option<T::Native>
+where
+    T: ArrowNumericType,
+    T::Native: Add<Output = T::Native>,
+{
+    if is_x86_feature_detected!("avx2") {
+        unsafe { sum_avx2(array) }
+    } else if is_x86_feature_detected!("avx") {
+        unsafe { sum_avx(array) }
+    } else {
+        sum_inner(array)
     }
 }
 
